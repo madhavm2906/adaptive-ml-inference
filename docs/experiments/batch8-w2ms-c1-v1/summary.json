@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "all_requests_valid": true,
+  "trials": [
+    {
+      "trial": 1,
+      "attempted": 5000,
+      "successful": 5000,
+      "failed": 0,
+      "failure_rate": 0.0,
+      "failure_outcomes": {},
+      "duration_seconds": 23.76272842600156,
+      "successful_requests_per_second": 210.413548072574,
+      "completed_requests_per_second": 210.413548072574,
+      "successful_latency_median_ms": 4.045359999508946,
+      "successful_latency_p95_ms": 8.328874999278923
+    },
+    {
+      "trial": 2,
+      "attempted": 5000,
+      "successful": 5000,
+      "failed": 0,
+      "failure_rate": 0.0,
+      "failure_outcomes": {},
+      "duration_seconds": 23.372948449999967,
+      "successful_requests_per_second": 213.9225186200249,
+      "completed_requests_per_second": 213.9225186200249,
+      "successful_latency_median_ms": 4.109111499928986,
+      "successful_latency_p95_ms": 7.719096000073478
+    },
+    {
+      "trial": 3,
+      "attempted": 5000,
+      "successful": 5000,
+      "failed": 0,
+      "failure_rate": 0.0,
+      "failure_outcomes": {},
+      "duration_seconds": 25.23430373299925,
+      "successful_requests_per_second": 198.1429744566889,
+      "completed_requests_per_second": 198.1429744566889,
+      "successful_latency_median_ms": 4.332900001827511,
+      "successful_latency_p95_ms": 8.832640000036918
+    }
+  ]
+}

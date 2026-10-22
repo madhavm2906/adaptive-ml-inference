@@ -1,0 +1,13 @@
+{
+  "trial": 2,
+  "attempted": 5000,
+  "successful": 5000,
+  "failed": 0,
+  "failure_rate": 0.0,
+  "failure_outcomes": {},
+  "duration_seconds": 12.675295043001825,
+  "successful_requests_per_second": 394.4681353007682,
+  "completed_requests_per_second": 394.4681353007682,
+  "successful_latency_median_ms": 2.03179900017858,
+  "successful_latency_p95_ms": 4.750689000502462
+}

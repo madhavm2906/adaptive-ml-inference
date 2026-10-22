@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "aggregation": "median of three trial statistics; no pooled p95",
+  "source_revision": "e41aa9478b7b5ced2b2de143d66908fac6f3ceab",
+  "validated_measured_requests": 135000,
+  "rows": [
+    {
+      "experiment": "single-c8-confirm-v1",
+      "concurrency": 8,
+      "max_batch_size": 1,
+      "max_batch_wait_ms": 0,
+      "median_trial_requests_per_second": 427.66707117265037,
+      "median_trial_latency_median_ms": 16.18934900034219,
+      "median_trial_latency_p95_ms": 37.47210700021242
+    },
+    {
+      "experiment": "batch8-w2ms-c8-confirm-v1",
+      "concurrency": 8,
+      "max_batch_size": 8,
+      "max_batch_wait_ms": 2,
+      "median_trial_requests_per_second": 510.36208692260413,
+      "median_trial_latency_median_ms": 14.069532500798232,
+      "median_trial_latency_p95_ms": 27.031886002077954
+    },
+    {
+      "experiment": "batch8-w0ms-c8-v1",
+      "concurrency": 8,
+      "max_batch_size": 8,
+      "max_batch_wait_ms": 0,
+      "median_trial_requests_per_second": 418.9107779178468,
+      "median_trial_latency_median_ms": 16.217730999414925,
+      "median_trial_latency_p95_ms": 31.984995999664534
+    },
+    {
+      "experiment": "single-c1-v1",
+      "concurrency": 1,
+      "max_batch_size": 1,
+      "max_batch_wait_ms": 0,
+      "median_trial_requests_per_second": 406.25270235737696,
+      "median_trial_latency_median_ms": 2.029246998063172,
+      "median_trial_latency_p95_ms": 4.92427300196141
+    },
+    {
+      "experiment": "batch8-w2ms-c1-v1",
+      "concurrency": 1,
+      "max_batch_size": 8,
+      "max_batch_wait_ms": 2,
+      "median_trial_requests_per_second": 210.413548072574,
+      "median_trial_latency_median_ms": 4.109111499928986,
+      "median_trial_latency_p95_ms": 8.328874999278923
+    },
+    {
+      "experiment": "batch8-w0ms-c1-v1",
+      "concurrency": 1,
+      "max_batch_size": 8,
+      "max_batch_wait_ms": 0,
+      "median_trial_requests_per_second": 394.9771390454094,
+      "median_trial_latency_median_ms": 2.019092000409728,
+      "median_trial_latency_p95_ms": 4.750689000502462
+    }
+  ]
+}
