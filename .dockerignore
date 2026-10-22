@@ -1,0 +1,13 @@
+# Include only the files needed to build the application image.
+
+*
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!requirements-tested.txt
+!src/
+!src/**
+
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/

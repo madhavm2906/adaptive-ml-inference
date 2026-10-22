@@ -1,11 +1,10 @@
 """
-Launch a reproducibly configured local inference server.
+Launch a reproducibly configured inference server.
 
 Set CPU thread limits before model startup. Expose configuration,
 package versions, machine information, and source state through /info.
 
-Use one server process with explicit asyncio and HTTP implementations.
-Disable per-request access logging to avoid adding that benchmark cost.
+Default to local access. Allow container networking through --host.
 """
 
 import argparse
@@ -64,6 +63,11 @@ def parse_args(argv=None):
     """Validate launch settings before starting the server."""
     parser = argparse.ArgumentParser(description=__doc__)
 
+    parser.add_argument(
+        "--host",
+        choices=["127.0.0.1", "0.0.0.0"],
+        default="127.0.0.1",
+    )
     parser.add_argument("--port", type=positive_integer, default=8000)
     parser.add_argument("--queue-capacity", type=positive_integer, default=32)
     parser.add_argument("--request-timeout", type=positive_float, default=5.0)
@@ -149,6 +153,8 @@ def build_app(args):
         "run_id": str(uuid.uuid4()),
         "model_id": MODEL_ID,
         "configuration": {
+            "listen_host": args.host,
+            "listen_port": args.port,
             "queue_capacity": args.queue_capacity,
             "request_timeout_seconds": args.request_timeout,
             "max_batch_size": args.batch_size,
@@ -184,7 +190,7 @@ def build_app(args):
 
 
 def main():
-    """Configure CPU execution and launch one local server process."""
+    """Configure CPU execution and launch one server process."""
     args = parse_args()
 
     torch.set_num_threads(args.torch_threads)
@@ -194,7 +200,7 @@ def main():
 
     uvicorn.run(
         app,
-        host="127.0.0.1",
+        host=args.host,
         port=args.port,
         workers=1,
         loop="asyncio",
