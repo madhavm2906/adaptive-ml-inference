@@ -1,14 +1,14 @@
 """
-Expose the CPU inference model through a validated HTTP API.
+Serve validated CPU predictions through a bounded inference queue.
 
-Load and warm up one model during application startup.
-Provide separate liveness and readiness endpoints.
-Accept one feature vector per prediction request and return raw scores.
+Load and warm up the model during startup. Execute predictions through
+one dedicated worker, reject excess waiting requests, and translate
+queue errors into stable HTTP responses.
 
-The initial model is untrained; its scores test the serving infrastructure.
+The initial model is untrained and provides a synthetic serving workload.
 """
 
-import logging
+import math
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -21,9 +21,14 @@ from adaptive_inference.model import (
     OUTPUT_CLASSES,
     InferenceModel,
 )
+from adaptive_inference.scheduler import (
+    BoundedInferenceQueue,
+    InferenceFailed,
+    QueueBusy,
+    QueueUnavailable,
+    RequestTimeout,
+)
 
-
-logger = logging.getLogger(__name__)
 
 MODEL_ID = "synthetic-mlp-v1"
 MAX_FEATURE_MAGNITUDE = 1_000_000.0
@@ -45,7 +50,7 @@ ScoreValue = Annotated[
 
 
 class PredictionRequest(BaseModel):
-    """Require exactly one vector of finite numerical features."""
+    """Require one vector of finite numerical features."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -59,7 +64,7 @@ class PredictionRequest(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    """Return raw model scores in the model's output order."""
+    """Return raw scores in the model's output order."""
 
     model_id: str
     scores: Annotated[
@@ -71,32 +76,8 @@ class PredictionResponse(BaseModel):
     ]
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Load and warm up the model before accepting requests."""
-    app.state.model = None
-
-    model = InferenceModel()
-
-    # Exercise the same path used by prediction requests.
-    model.predict(
-        torch.zeros(
-            (1, INPUT_FEATURES),
-            dtype=torch.float32,
-            device="cpu",
-        )
-    )
-
-    app.state.model = model
-
-    try:
-        yield
-    finally:
-        app.state.model = None
-
-
 def get_model(request: Request) -> InferenceModel:
-    """Return the loaded model or report that it is unavailable."""
+    """Check model availability before accepting a prediction."""
     model = getattr(request.app.state, "model", None)
 
     if model is None:
@@ -108,27 +89,104 @@ def get_model(request: Request) -> InferenceModel:
     return model
 
 
-def create_app() -> FastAPI:
-    """Create an independent application instance for serving or tests."""
+def get_scheduler(request: Request) -> BoundedInferenceQueue:
+    """Require an inference queue that is accepting submissions."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+
+    if scheduler is None or not scheduler.accepting:
+        raise HTTPException(
+            status_code=503,
+            detail="service_unavailable",
+        )
+
+    return scheduler
+
+
+def create_app(
+    *,
+    queue_capacity: int = 32,
+    request_timeout: float = 5.0,
+) -> FastAPI:
+    """Create a service with explicit queue and deadline settings."""
+    if type(queue_capacity) is not int or queue_capacity < 1:
+        raise ValueError("queue_capacity must be a positive integer")
+
+    if (
+        isinstance(request_timeout, bool)
+        or not isinstance(request_timeout, (int, float))
+        or not math.isfinite(request_timeout)
+        or request_timeout <= 0
+    ):
+        raise ValueError("request_timeout must be finite and positive")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Warm up the model, start its queue, and drain it at shutdown."""
+        app.state.model = None
+        app.state.scheduler = None
+
+        model = InferenceModel()
+
+        model.predict(
+            torch.zeros(
+                (1, INPUT_FEATURES),
+                dtype=torch.float32,
+                device="cpu",
+            )
+        )
+
+        def process_features(features: list[float]) -> list[float]:
+            """Run tensor conversion and inference in the queue's thread."""
+            tensor = torch.tensor(
+                [features],
+                dtype=torch.float32,
+                device="cpu",
+            )
+
+            scores = model.predict(tensor)
+
+            return scores[0].tolist()
+
+        scheduler = BoundedInferenceQueue(
+            process_features,
+            capacity=queue_capacity,
+        )
+        await scheduler.start()
+
+        app.state.model = model
+        app.state.scheduler = scheduler
+
+        try:
+            yield
+        finally:
+            # Stop admission and finish accepted work before releasing
+            # the model reference used by the processor.
+            try:
+                await scheduler.close()
+            finally:
+                app.state.scheduler = None
+                app.state.model = None
+
     app = FastAPI(
         title="Adaptive ML Inference Service",
         version="0.1.0",
         description=(
-            "CPU inference infrastructure with a synthetic model. "
-            "The initial model's scores have no trained class meaning."
+            "Bounded CPU inference with request deadlines. "
+            "The initial model is an untrained synthetic workload."
         ),
         lifespan=lifespan,
     )
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        """Report liveness independently of model availability."""
+    async def health() -> dict[str, str]:
+        """Report application liveness independently of inference."""
         return {"status": "ok"}
 
     @app.get("/ready")
-    def ready(request: Request) -> dict[str, str]:
-        """Report readiness only when the model is available."""
+    async def ready(request: Request) -> dict[str, str]:
+        """Require both a loaded model and an accepting queue."""
         get_model(request)
+        get_scheduler(request)
 
         return {
             "status": "ready",
@@ -136,35 +194,45 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/predict", response_model=PredictionResponse)
-    def predict(
+    async def predict(
         payload: PredictionRequest,
         request: Request,
     ) -> PredictionResponse:
-        """Run one validated request through the CPU model."""
-        model = get_model(request)
+        """Submit validated features without blocking the event loop."""
+        get_model(request)
+        scheduler = get_scheduler(request)
 
         try:
-            features = torch.tensor(
-                [payload.features],
-                dtype=torch.float32,
-                device="cpu",
+            scores = await scheduler.submit(
+                payload.features,
+                timeout=request_timeout,
             )
-
-            scores = model.predict(features)
-
-            return PredictionResponse(
-                model_id=MODEL_ID,
-                scores=scores[0].tolist(),
-            )
-        except Exception:
-            # Preserve diagnostic details in server logs while returning
-            # a stable error response without internal implementation data.
-            logger.exception("Prediction execution failed")
-
+        except QueueBusy:
+            raise HTTPException(
+                status_code=503,
+                detail="queue_full",
+                headers={"Retry-After": "1"},
+            ) from None
+        except QueueUnavailable:
+            raise HTTPException(
+                status_code=503,
+                detail="service_unavailable",
+            ) from None
+        except RequestTimeout:
+            raise HTTPException(
+                status_code=504,
+                detail="request_timeout",
+            ) from None
+        except InferenceFailed:
             raise HTTPException(
                 status_code=500,
                 detail="inference_failed",
             ) from None
+
+        return PredictionResponse(
+            model_id=MODEL_ID,
+            scores=scores,
+        )
 
     return app
 
