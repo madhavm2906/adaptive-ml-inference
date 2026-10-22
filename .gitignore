@@ -1,0 +1,13 @@
+# Exclude local environments, caches, builds, and generated experiments.
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+results/
+.env

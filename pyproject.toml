@@ -1,0 +1,31 @@
+# Define the package, runtime dependencies, and automated test configuration.
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-ml-inference"
+version = "0.1.0"
+description = "CPU inference service with bounded queues and adaptive batching"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "torch",
+    "fastapi",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
