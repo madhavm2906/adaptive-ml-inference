@@ -1,11 +1,12 @@
 """
-Serve validated CPU predictions through a bounded inference queue.
+Serve validated CPU predictions through a bounded batching queue.
 
-Load and warm up the model during startup. Execute predictions through
-one dedicated worker, reject excess waiting requests, and translate
-queue errors into stable HTTP responses.
+Load and warm up one model during startup. Combine requests into
+configurable batches, run one model call per batch, and route score
+vectors back to their callers.
 
-The initial model is untrained and provides a synthetic serving workload.
+Default settings preserve single-request execution. The initial model
+is untrained and provides a synthetic serving workload.
 """
 
 import math
@@ -18,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from adaptive_inference.model import (
     INPUT_FEATURES,
+    MAX_BATCH_SIZE,
     OUTPUT_CLASSES,
     InferenceModel,
 )
@@ -90,7 +92,7 @@ def get_model(request: Request) -> InferenceModel:
 
 
 def get_scheduler(request: Request) -> BoundedInferenceQueue:
-    """Require an inference queue that is accepting submissions."""
+    """Require a queue that is accepting submissions."""
     scheduler = getattr(request.app.state, "scheduler", None)
 
     if scheduler is None or not scheduler.accepting:
@@ -106,8 +108,15 @@ def create_app(
     *,
     queue_capacity: int = 32,
     request_timeout: float = 5.0,
+    max_batch_size: int = 1,
+    max_batch_wait: float = 0.0,
 ) -> FastAPI:
-    """Create a service with explicit queue and deadline settings."""
+    """
+    Create a service with explicit queue, deadline, and batch limits.
+
+    Batch waiting is measured in seconds. Queue capacity counts waiting
+    entries; the worker additionally holds at most one batch.
+    """
     if type(queue_capacity) is not int or queue_capacity < 1:
         raise ValueError("queue_capacity must be a positive integer")
 
@@ -118,6 +127,22 @@ def create_app(
         or request_timeout <= 0
     ):
         raise ValueError("request_timeout must be finite and positive")
+
+    if (
+        type(max_batch_size) is not int
+        or not 1 <= max_batch_size <= MAX_BATCH_SIZE
+    ):
+        raise ValueError(
+            f"max_batch_size must be between 1 and {MAX_BATCH_SIZE}"
+        )
+
+    if (
+        isinstance(max_batch_wait, bool)
+        or not isinstance(max_batch_wait, (int, float))
+        or not math.isfinite(max_batch_wait)
+        or max_batch_wait < 0
+    ):
+        raise ValueError("max_batch_wait must be finite and nonnegative")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -135,21 +160,26 @@ def create_app(
             )
         )
 
-        def process_features(features: list[float]) -> list[float]:
-            """Run tensor conversion and inference in the queue's thread."""
+        def process_batch(
+            feature_vectors: list[list[float]],
+        ) -> list[list[float]]:
+            """Convert the whole batch and execute one model call."""
             tensor = torch.tensor(
-                [features],
+                feature_vectors,
                 dtype=torch.float32,
                 device="cpu",
             )
 
             scores = model.predict(tensor)
 
-            return scores[0].tolist()
+            # Preserve the row order used by the scheduler.
+            return scores.tolist()
 
         scheduler = BoundedInferenceQueue(
-            process_features,
+            batch_processor=process_batch,
             capacity=queue_capacity,
+            max_batch_size=max_batch_size,
+            max_batch_wait=max_batch_wait,
         )
         await scheduler.start()
 
@@ -159,8 +189,6 @@ def create_app(
         try:
             yield
         finally:
-            # Stop admission and finish accepted work before releasing
-            # the model reference used by the processor.
             try:
                 await scheduler.close()
             finally:
@@ -171,7 +199,7 @@ def create_app(
         title="Adaptive ML Inference Service",
         version="0.1.0",
         description=(
-            "Bounded CPU inference with request deadlines. "
+            "Bounded CPU inference with dynamic batching and deadlines. "
             "The initial model is an untrained synthetic workload."
         ),
         lifespan=lifespan,
@@ -198,7 +226,7 @@ def create_app(
         payload: PredictionRequest,
         request: Request,
     ) -> PredictionResponse:
-        """Submit validated features without blocking the event loop."""
+        """Submit one request and await its own score vector."""
         get_model(request)
         scheduler = get_scheduler(request)
 
